@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compileOnSave": false,
+  "files": [],
+  "references": [
+    {
+      "path": "./api-e2e"
+    },
+    {
+      "path": "./api"
+    },
+    {
+      "path": "./dashboard-e2e"
+    },
+    {
+      "path": "./libs/data"
+    },
+    {
+      "path": "./libs/auth"
+    },
+    {
+      "path": "./dashboard"
+    }
+  ]
+}
