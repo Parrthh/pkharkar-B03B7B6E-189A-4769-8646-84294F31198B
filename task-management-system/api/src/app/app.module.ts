@@ -1,45 +1,36 @@
 import 'dotenv/config';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { SeedService } from '../seed/seed.service';
+import { SeedModule } from '../seed/seed.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { OrganizationEntity } from '../entities/organization.entity';
 import { UserEntity } from '../entities/user.entity';
 import { TaskEntity } from '../entities/task.entity';
 import { AuditLogEntity } from '../entities/audit-log.entity';
-import { UserController } from '../user/user.controller';
-
-// If you already have AuthModule, keep it.
-// If you don’t yet, remove this import + usage.
 import { AuthModule } from '../auth/auth.module';
+import { UserController } from '../user/user.controller';
+import { TasksModule } from '../tasks/tasks.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
 
 @Module({
   imports: [
     TypeOrmModule.forRoot({
       type: 'sqlite',
-      database: process.env.DB_PATH || './data.db',
-      entities: [
-        OrganizationEntity,
-        UserEntity,
-        TaskEntity,
-        AuditLogEntity,
-      ],
+      database: process.env.DB_PATH || 'api/data.db', // ✅ recommend explicit path
+      entities: [OrganizationEntity, UserEntity, TaskEntity, AuditLogEntity],
       synchronize: true,
     }),
 
-    // Repositories available for controllers/services inside AppModule scope
-    TypeOrmModule.forFeature([
-      OrganizationEntity,
-      UserEntity,
-      TaskEntity,
-      AuditLogEntity,
-    ]),
+    // If you keep controllers in AppModule scope and inject repos there
+    TypeOrmModule.forFeature([OrganizationEntity, UserEntity, TaskEntity, AuditLogEntity]),
 
-    // Keep AuthModule here (normal runtime module)
     AuthModule,
+    TasksModule,
+    SeedModule,
+    AuditLogModule
   ],
   controllers: [AppController, UserController],
-  providers: [AppService, SeedService],
+  providers: [AppService],
 })
 export class AppModule { }

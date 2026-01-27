@@ -1,3 +1,4 @@
+// api/src/entities/task.entity.ts
 import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import { OrganizationEntity } from './organization.entity';
 import { UserEntity } from './user.entity';
@@ -10,23 +11,26 @@ export class TaskEntity {
     @Column()
     title!: string;
 
-    @Column({ nullable: true })
-    description?: string;
+    @Column({ type: 'text', nullable: true })
+    description!: string | null;
 
-    @Column({ type: 'text', default: 'Work' })
-    category!: 'Work' | 'Personal';
+    @Column({ default: 'Todo' })
+    status!: string;
 
-    @Column({ type: 'text', default: 'Work' })
-    status!: 'ToDo' | 'InProgress' | 'Done';
+    @Column({ default: 'Other' })
+    category!: string;
 
-    @Column({ type: 'int', default: 0 })
-    order!: number;
+    @Column({ name: 'sort_order', type: 'integer', default: 0 })
+    sortOrder!: number;
 
-    @ManyToOne(() => OrganizationEntity, { eager: true, onDelete: 'CASCADE' })
+    @ManyToOne(() => OrganizationEntity, { eager: false })
     organization!: OrganizationEntity;
 
-    @ManyToOne(() => UserEntity, { eager: true, nullable: true, onDelete: 'SET NULL' })
-    createdBy?: UserEntity | null;
+    @ManyToOne(() => UserEntity, { eager: false })
+    createdBy!: UserEntity;
+
+    @ManyToOne(() => UserEntity, { eager: false, nullable: true })
+    assignedTo!: UserEntity | null;
 
     @CreateDateColumn()
     createdAt!: Date;

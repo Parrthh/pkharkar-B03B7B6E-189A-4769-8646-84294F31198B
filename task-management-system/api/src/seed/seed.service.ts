@@ -12,43 +12,28 @@ export class SeedService {
     private readonly logger = new Logger(SeedService.name);
 
     constructor(
-        @InjectRepository(OrganizationEntity)
-        private readonly orgRepo: Repository<OrganizationEntity>,
-
-        @InjectRepository(UserEntity)
-        private readonly userRepo: Repository<UserEntity>,
-
-        @InjectRepository(AuditLogEntity)
-        private readonly auditRepo: Repository<AuditLogEntity>,
+        @InjectRepository(OrganizationEntity) private readonly orgRepo: Repository<OrganizationEntity>,
+        @InjectRepository(UserEntity) private readonly userRepo: Repository<UserEntity>,
+        @InjectRepository(AuditLogEntity) private readonly auditRepo: Repository<AuditLogEntity>,
     ) { }
 
-    /**
-     * Manual seed entry point
-     * Safe to run multiple times
-     */
-    async seed(): Promise<void> {
+    async seed() {
         const userCount = await this.userRepo.count();
-
         if (userCount > 0) {
             this.logger.log(`Seed skipped (users already exist: ${userCount})`);
             return;
         }
 
-        this.logger.log('🌱 Seeding organizations and users...');
+        this.logger.log('Seeding organizations + users...');
 
-        // Organizations (2-level hierarchy)
-        const parentOrg = this.orgRepo.create({
-            name: 'Org Parent',
-        });
-        await this.orgRepo.save(parentOrg);
+        // 2-level org hierarchy
+        const parent = this.orgRepo.create({ name: 'Org Parent' });
+        await this.orgRepo.save(parent);
 
-        const childOrg = this.orgRepo.create({
-            name: 'Org Child',
-            parent: parentOrg,
-        });
-        await this.orgRepo.save(childOrg);
+        const child = this.orgRepo.create({ name: 'Org Child', parent });
+        await this.orgRepo.save(child);
 
-        // Users
+        // Demo password
         const passwordPlain = 'Password123!';
         const passwordHash = await bcrypt.hash(passwordPlain, 10);
 
@@ -56,26 +41,25 @@ export class SeedService {
             email: 'owner@example.com',
             passwordHash,
             role: 'Owner',
-            organization: parentOrg,
+            organization: parent,
         });
 
         const admin = this.userRepo.create({
             email: 'admin@example.com',
             passwordHash,
             role: 'Admin',
-            organization: childOrg,
+            organization: child,
         });
 
         const viewer = this.userRepo.create({
             email: 'viewer@example.com',
             passwordHash,
             role: 'Viewer',
-            organization: childOrg,
+            organization: child,
         });
 
         await this.userRepo.save([owner, admin, viewer]);
 
-        // Audit log
         await this.auditRepo.save(
             this.auditRepo.create({
                 userId: owner.id,
@@ -83,16 +67,12 @@ export class SeedService {
                 resourceType: 'seed',
                 success: true,
                 metadata: JSON.stringify({
-                    users: [
-                        'owner@example.com',
-                        'admin@example.com',
-                        'viewer@example.com',
-                    ],
+                    users: ['owner@example.com', 'admin@example.com', 'viewer@example.com'],
                     password: passwordPlain,
                 }),
             }),
         );
 
-        this.logger.log('✅ Seed complete. Demo users created.');
+        this.logger.log('Seed complete. Demo users created.');
     }
 }
