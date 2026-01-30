@@ -16,13 +16,13 @@ import type {
     UpdateTaskDto,
     JwtPayload,
     TaskDto,
-    Role,
 } from '@org/data';
 
-function roleRank(role: Role): number {
+function roleRank(role: string): number {
+    // Keep this string-based to avoid TS fighting when Role type comes from @org/data
     if (role === 'Owner') return 3;
     if (role === 'Admin') return 2;
-    return 1; // Viewer
+    return 1; // Viewer or anything else
 }
 
 @Injectable()
@@ -47,22 +47,26 @@ export class TasksService {
             relations: { organization: { children: true } },
         });
 
-        const myOrgId = user.organizationId;
-        if (!me?.organization) return [myOrgId];
+        // fallback: at least their own orgId from JWT
+        if (!me?.organization) return [user.organizationId];
 
-        const ids = new Set<string>([me.organization.id]);
+        const myOrg = me.organization;
+        const ids = new Set<string>([myOrg.id]);
 
-        // Admin/Owner can see child orgs too
-        if (roleRank(user.role) >= roleRank('Admin')) {
-            if (me.organization.children?.length) {
-                me.organization.children.forEach((c) => ids.add(c.id));
-            }
+        // Admin/Owner can also see child org tasks
+        if (roleRank(String(user.role)) >= roleRank('Admin')) {
+            (myOrg.children ?? []).forEach((c) => ids.add(c.id));
         }
 
         return Array.from(ids);
     }
 
-    private async audit(user: JwtPayload, action: string, success: boolean, metadata: any) {
+    private async audit(
+        user: JwtPayload,
+        action: string,
+        success: boolean,
+        metadata: unknown,
+    ) {
         await this.auditRepo.save(
             this.auditRepo.create({
                 userId: user.sub,
@@ -74,15 +78,42 @@ export class TasksService {
         );
     }
 
-    private toDto(t: TaskEntity): TaskDto {
-        return {
+    async list(user: JwtPayload): Promise<TaskDto[]> {
+        const orgIds = await this.getAccessibleOrgIds(user);
+        const role = String(user.role);
+
+        // Viewer: only tasks assigned to them OR created by them (within accessible orgs)
+        // Admin/Owner: all tasks in accessible orgs
+        const where =
+            role === 'Viewer'
+                ? [
+                    {
+                        organization: { id: In(orgIds) },
+                        assignedTo: { id: user.sub },
+                    },
+                    {
+                        organization: { id: In(orgIds) },
+                        createdBy: { id: user.sub },
+                    },
+                ]
+                : [{ organization: { id: In(orgIds) } }];
+
+        const tasks = await this.taskRepo.find({
+            where,
+            relations: { organization: true, createdBy: true, assignedTo: true },
+            order: { sortOrder: 'ASC', createdAt: 'DESC' }, // ✅ use sortOrder (DB)
+        });
+
+        await this.audit(user, 'LIST', true, { count: tasks.length, orgIds });
+
+        return tasks.map((t) => ({
             id: t.id,
             title: t.title,
             description: t.description,
             status: t.status as any,
             category: t.category as any,
 
-            // ✅ DTO expects "order", Entity stores "sortOrder"
+            // ✅ map DB field -> DTO field
             order: t.sortOrder,
 
             organizationId: t.organization.id,
@@ -90,33 +121,12 @@ export class TasksService {
             assignedToId: t.assignedTo?.id ?? null,
             createdAt: t.createdAt.toISOString(),
             updatedAt: t.updatedAt.toISOString(),
-        };
-    }
-
-    async list(user: JwtPayload): Promise<TaskDto[]> {
-        const orgIds = await this.getAccessibleOrgIds(user);
-        const role = user.role;
-
-        const where =
-            role === 'Viewer'
-                ? [
-                    { organization: { id: In(orgIds) }, assignedTo: { id: user.sub } },
-                    { organization: { id: In(orgIds) }, createdBy: { id: user.sub } },
-                ]
-                : [{ organization: { id: In(orgIds) } }];
-
-        const tasks = await this.taskRepo.find({
-            where,
-            relations: { organization: true, createdBy: true, assignedTo: true },
-            order: { sortOrder: 'ASC', createdAt: 'DESC' }, // ✅ sortOrder
-        });
-
-        await this.audit(user, 'LIST', true, { count: tasks.length, orgIds });
-        return tasks.map((t) => this.toDto(t));
+        }));
     }
 
     async create(user: JwtPayload, dto: CreateTaskDto): Promise<TaskDto> {
-        if (roleRank(user.role) < roleRank('Admin')) {
+        const role = String(user.role);
+        if (roleRank(role) < roleRank('Admin')) {
             await this.audit(user, 'CREATE', false, { reason: 'insufficient_role' });
             throw new ForbiddenException('Insufficient role');
         }
@@ -125,7 +135,10 @@ export class TasksService {
         const targetOrgId = dto.organizationId ?? user.organizationId;
 
         if (!orgIds.includes(targetOrgId)) {
-            await this.audit(user, 'CREATE', false, { reason: 'org_forbidden', targetOrgId });
+            await this.audit(user, 'CREATE', false, {
+                reason: 'org_forbidden',
+                targetOrgId,
+            });
             throw new ForbiddenException('Cannot create task in that organization');
         }
 
@@ -142,10 +155,10 @@ export class TasksService {
         const task = this.taskRepo.create({
             title: dto.title,
             description: dto.description ?? null,
-            status: dto.status ?? 'Todo',
-            category: dto.category ?? 'Other',
+            status: (dto.status ?? 'Todo') as any,
+            category: (dto.category ?? 'Other') as any,
 
-            // ✅ dto.order -> entity.sortOrder
+            // ✅ map DTO order -> DB sortOrder
             sortOrder: dto.order ?? 0,
 
             organization: org,
@@ -156,17 +169,27 @@ export class TasksService {
         const saved = await this.taskRepo.save(task);
         await this.audit(user, 'CREATE', true, { taskId: saved.id, targetOrgId });
 
-        // reload relations for DTO safety
-        const full = await this.taskRepo.findOne({
-            where: { id: saved.id },
-            relations: { organization: true, createdBy: true, assignedTo: true },
-        });
+        return {
+            id: saved.id,
+            title: saved.title,
+            description: saved.description,
+            status: saved.status as any,
+            category: saved.category as any,
 
-        return this.toDto(full ?? saved);
+            // ✅ map DB field -> DTO field
+            order: saved.sortOrder,
+
+            organizationId: org.id,
+            createdById: creator.id,
+            assignedToId: assignedTo?.id ?? null,
+            createdAt: saved.createdAt.toISOString(),
+            updatedAt: saved.updatedAt.toISOString(),
+        };
     }
 
     async update(user: JwtPayload, id: string, dto: UpdateTaskDto): Promise<TaskDto> {
-        if (roleRank(user.role) < roleRank('Admin')) {
+        const role = String(user.role);
+        if (roleRank(role) < roleRank('Admin')) {
             await this.audit(user, 'UPDATE', false, { reason: 'insufficient_role', id });
             throw new ForbiddenException('Insufficient role');
         }
@@ -195,17 +218,30 @@ export class TasksService {
         if (dto.status !== undefined) task.status = dto.status as any;
         if (dto.category !== undefined) task.category = dto.category as any;
 
-        // ✅ dto.order -> entity.sortOrder
+        // ✅ map DTO order -> DB sortOrder
         if (dto.order !== undefined) task.sortOrder = dto.order;
 
         const saved = await this.taskRepo.save(task);
         await this.audit(user, 'UPDATE', true, { id });
 
-        return this.toDto(saved);
+        return {
+            id: saved.id,
+            title: saved.title,
+            description: saved.description,
+            status: saved.status as any,
+            category: saved.category as any,
+            order: saved.sortOrder,
+            organizationId: saved.organization.id,
+            createdById: saved.createdBy.id,
+            assignedToId: saved.assignedTo?.id ?? null,
+            createdAt: saved.createdAt.toISOString(),
+            updatedAt: saved.updatedAt.toISOString(),
+        };
     }
 
     async remove(user: JwtPayload, id: string): Promise<{ ok: true }> {
-        if (roleRank(user.role) < roleRank('Admin')) {
+        const role = String(user.role);
+        if (roleRank(role) < roleRank('Admin')) {
             await this.audit(user, 'DELETE', false, { reason: 'insufficient_role', id });
             throw new ForbiddenException('Insufficient role');
         }
@@ -214,7 +250,7 @@ export class TasksService {
 
         const task = await this.taskRepo.findOne({
             where: { id },
-            relations: { organization: true },
+            relations: { organization: true, createdBy: true },
         });
         if (!task) throw new NotFoundException('Task not found');
 

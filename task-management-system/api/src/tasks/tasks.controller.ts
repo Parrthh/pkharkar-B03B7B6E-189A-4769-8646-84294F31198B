@@ -1,11 +1,26 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Req, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import {
+    Body,
+    Controller,
+    Delete,
+    Get,
+    Param,
+    Post,
+    Put,
+    Req,
+    UseGuards,
+} from '@nestjs/common';
 
-// We will use these from libs/auth
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RbacGuard, Roles } from '@org/auth';
 
-import type { CreateTaskDto, UpdateTaskDto, JwtPayload } from '@org/data';
+import type { JwtPayload } from '@org/data';
 import { TasksService } from './tasks.service';
+
+// ✅ Validation DTO classes (runtime validation)
+import {
+    CreateTaskBodyDto,
+    UpdateTaskBodyDto,
+} from './dto/task.validation';
 
 @Controller('tasks')
 @UseGuards(JwtAuthGuard, RbacGuard)
@@ -20,13 +35,21 @@ export class TasksController {
 
     @Post()
     @Roles('Admin', 'Owner')
-    create(@Req() req: { user: JwtPayload }, @Body() dto: CreateTaskDto) {
+    create(
+        @Req() req: { user: JwtPayload },
+        @Body() dto: CreateTaskBodyDto,
+    ) {
+        // dto is validated already by ValidationPipe
         return this.tasksService.create(req.user, dto);
     }
 
     @Put(':id')
     @Roles('Admin', 'Owner')
-    update(@Req() req: { user: JwtPayload }, @Param('id') id: string, @Body() dto: UpdateTaskDto) {
+    update(
+        @Req() req: { user: JwtPayload },
+        @Param('id') id: string,
+        @Body() dto: UpdateTaskBodyDto,
+    ) {
         return this.tasksService.update(req.user, id, dto);
     }
 

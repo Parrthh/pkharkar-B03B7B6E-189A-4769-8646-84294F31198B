@@ -17,12 +17,12 @@ import { AuditLogModule } from '../audit-log/audit-log.module';
   imports: [
     TypeOrmModule.forRoot({
       type: 'sqlite',
-      database: process.env.DB_PATH || 'api/data.db', // ✅ recommend explicit path
+      database: process.env.DB_PATH || 'api/data.db',
       entities: [OrganizationEntity, UserEntity, TaskEntity, AuditLogEntity],
       synchronize: true,
     }),
 
-    // If you keep controllers in AppModule scope and inject repos there
+
     TypeOrmModule.forFeature([OrganizationEntity, UserEntity, TaskEntity, AuditLogEntity]),
 
     AuthModule,

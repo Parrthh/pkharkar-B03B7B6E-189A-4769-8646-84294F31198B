@@ -1,7 +1,7 @@
+// api/src/tasks/tasks.service.spec.ts
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ForbiddenException } from '@nestjs/common';
-import { Repository } from 'typeorm';
 
 import { TasksService } from './tasks.service';
 import { TaskEntity } from '../entities/task.entity';
@@ -11,7 +11,17 @@ import { AuditLogEntity } from '../entities/audit-log.entity';
 
 import type { JwtPayload, CreateTaskDto } from '@org/data';
 
-function repoMock<T>() {
+// Minimal repo mock type (avoids Repository<T> typing headaches)
+type RepoMock<T> = {
+    find: jest.Mock;
+    findOne: jest.Mock;
+    save: jest.Mock;
+    create: jest.Mock;
+    delete: jest.Mock;
+    count: jest.Mock;
+};
+
+function repoMock<T>(): RepoMock<T> {
     return {
         find: jest.fn(),
         findOne: jest.fn(),
@@ -19,7 +29,7 @@ function repoMock<T>() {
         create: jest.fn((x) => x),
         delete: jest.fn(),
         count: jest.fn(),
-    } as unknown as jest.Mocked<Repository<T>>;
+    };
 }
 
 describe('TasksService', () => {
@@ -50,10 +60,10 @@ describe('TasksService', () => {
         const moduleRef = await Test.createTestingModule({
             providers: [
                 TasksService,
-                { provide: getRepositoryToken(TaskEntity), useValue: taskRepo },
-                { provide: getRepositoryToken(OrganizationEntity), useValue: orgRepo },
-                { provide: getRepositoryToken(UserEntity), useValue: userRepo },
-                { provide: getRepositoryToken(AuditLogEntity), useValue: auditRepo },
+                { provide: getRepositoryToken(TaskEntity), useValue: taskRepo as any },
+                { provide: getRepositoryToken(OrganizationEntity), useValue: orgRepo as any },
+                { provide: getRepositoryToken(UserEntity), useValue: userRepo as any },
+                { provide: getRepositoryToken(AuditLogEntity), useValue: auditRepo as any },
             ],
         }).compile();
 
@@ -67,22 +77,25 @@ describe('TasksService', () => {
             ForbiddenException
         );
 
-        // optional: ensure audit log attempted
         expect(auditRepo.save).toHaveBeenCalled();
     });
 
     it('Admin can create a task', async () => {
+        // 1st call: getAccessibleOrgIds() -> load me + org children
         userRepo.findOne = jest
             .fn()
             .mockResolvedValueOnce({
                 id: adminUser.sub,
                 organization: { id: adminUser.organizationId, children: [] },
             })
+            // 2nd call: creator lookup
             .mockResolvedValueOnce({
                 id: adminUser.sub,
             });
 
-        orgRepo.findOne = jest.fn().mockResolvedValue({ id: adminUser.organizationId });
+        orgRepo.findOne = jest.fn().mockResolvedValue({
+            id: adminUser.organizationId,
+        });
 
         taskRepo.save = jest.fn().mockResolvedValue({
             id: 'task-1',
@@ -90,7 +103,7 @@ describe('TasksService', () => {
             description: 'hello',
             status: 'Todo',
             category: 'Work',
-            order: 1,
+            sortOrder: 1, // entity uses sortOrder
             organization: { id: adminUser.organizationId },
             createdBy: { id: adminUser.sub },
             assignedTo: null,
@@ -103,14 +116,14 @@ describe('TasksService', () => {
             description: 'hello',
             status: 'Todo',
             category: 'Work',
-            order: 1,
+            order: 1, // dto uses order
         } as any;
 
         const result = await service.create(adminUser, dto);
 
         expect(result.id).toBe('task-1');
         expect(result.title).toBe('First task');
-        expect(result.order).toBe(1);
+        expect(result.order).toBe(1); // service should map sortOrder -> order
         expect(auditRepo.save).toHaveBeenCalled();
     });
 });
